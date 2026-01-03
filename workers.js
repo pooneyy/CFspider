@@ -1,6 +1,8 @@
-// CFspider - Cloudflare Workers 代理 IP 池
+// CFspider - Cloudflare Workers 代理 IP 池 v1.2.0
 
 let 反代IP = '';
+const VERSION = '1.2.0';
+const START_TIME = Date.now();
 
 export default {
     async fetch(request, env, ctx) {
@@ -20,7 +22,7 @@ export default {
         
         const corsHeaders = {
             'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
             'Access-Control-Allow-Headers': '*'
         };
         
@@ -29,7 +31,7 @@ export default {
         }
         
         if (path === '' || path === '/') {
-            return new Response(generateCyberpunkPage(request, url), {
+            return new Response(generateCyberpunkPage(request, url, 访问IP), {
                 headers: { 'Content-Type': 'text/html; charset=utf-8' }
             });
         }
@@ -37,10 +39,32 @@ export default {
         if (path === 'debug') {
             return new Response(JSON.stringify({
                 success: true,
+                version: VERSION,
                 proxyip: 反代IP,
-                cf_colo: request.cf?.colo || 'unknown',
-                cf_country: request.cf?.country || 'unknown',
-                visitor_ip: 访问IP,
+                cf_info: {
+                    colo: request.cf?.colo || 'unknown',
+                    country: request.cf?.country || 'unknown',
+                    city: request.cf?.city || 'unknown',
+                    region: request.cf?.region || 'unknown',
+                    asn: request.cf?.asn || 'unknown',
+                    timezone: request.cf?.timezone || 'unknown',
+                    latitude: request.cf?.latitude || 'unknown',
+                    longitude: request.cf?.longitude || 'unknown',
+                    postalCode: request.cf?.postalCode || 'unknown',
+                    metroCode: request.cf?.metroCode || 'unknown',
+                    continent: request.cf?.continent || 'unknown'
+                },
+                visitor: {
+                    ip: 访问IP,
+                    country: request.cf?.country || 'unknown',
+                    asn: request.cf?.asn || 'unknown'
+                },
+                request: {
+                    method: request.method,
+                    url: request.url,
+                    headers: Object.fromEntries(request.headers.entries())
+                },
+                uptime: Math.floor((Date.now() - START_TIME) / 1000) + 's',
                 timestamp: new Date().toISOString()
             }, null, 2), {
                 headers: { 'Content-Type': 'application/json', ...corsHeaders }
@@ -54,6 +78,23 @@ export default {
             });
         }
         
+        if (path === 'api/status') {
+            return new Response(JSON.stringify({
+                success: true,
+                version: VERSION,
+                status: 'ONLINE',
+                uptime: Math.floor((Date.now() - START_TIME) / 1000),
+                node: {
+                    colo: request.cf?.colo || 'unknown',
+                    country: request.cf?.country || 'unknown',
+                    city: request.cf?.city || 'unknown'
+                },
+                timestamp: new Date().toISOString()
+            }, null, 2), {
+                headers: { 'Content-Type': 'application/json', ...corsHeaders }
+            });
+        }
+        
         if (path === 'api/fetch') {
             const targetUrl = url.searchParams.get('url');
             if (!targetUrl) {
@@ -63,19 +104,22 @@ export default {
                 });
             }
             try {
+                const startTime = Date.now();
                 const response = await fetch(targetUrl, {
                     headers: {
-                        'User-Agent': request.headers.get('User-Agent') || 'CFspider/1.0',
+                        'User-Agent': request.headers.get('User-Agent') || 'CFspider/' + VERSION,
                         'Accept': '*/*'
                     }
                 });
                 const content = await response.text();
+                const duration = Date.now() - startTime;
                 return new Response(content, {
                     status: response.status,
                     headers: {
                         'Content-Type': response.headers.get('Content-Type') || 'text/plain',
                         'X-Proxy-IP': 反代IP,
                         'X-CF-Colo': request.cf?.colo || 'unknown',
+                        'X-Response-Time': duration + 'ms',
                         ...corsHeaders
                     }
                 });
@@ -99,17 +143,20 @@ export default {
                 });
             }
             try {
+                const startTime = Date.now();
                 const response = await fetch(targetUrl, {
                     headers: {
-                        'User-Agent': request.headers.get('User-Agent') || 'CFspider/1.0',
+                        'User-Agent': request.headers.get('User-Agent') || 'CFspider/' + VERSION,
                         'Accept': 'application/json'
                     }
                 });
                 const data = await response.json();
+                const duration = Date.now() - startTime;
                 return new Response(JSON.stringify({
                     success: true,
                     proxyip: 反代IP,
                     cf_colo: request.cf?.colo || 'unknown',
+                    response_time: duration + 'ms',
                     data
                 }, null, 2), {
                     headers: { 'Content-Type': 'application/json', ...corsHeaders }
@@ -129,7 +176,9 @@ export default {
             return new Response(JSON.stringify({
                 success: true,
                 proxyip: 反代IP,
-                colo: request.cf?.colo || 'unknown'
+                colo: request.cf?.colo || 'unknown',
+                country: request.cf?.country || 'unknown',
+                city: request.cf?.city || 'unknown'
             }, null, 2), {
                 headers: { 'Content-Type': 'application/json', ...corsHeaders }
             });
@@ -162,7 +211,7 @@ async function handleProxyRequest(request, url, corsHeaders) {
     }
     
     if (!headers['User-Agent']) {
-        headers['User-Agent'] = 'CFspider/1.0';
+        headers['User-Agent'] = 'CFspider/' + VERSION;
     }
     
     try {
@@ -171,17 +220,20 @@ async function handleProxyRequest(request, url, corsHeaders) {
             body = await request.text();
         }
         
+        const startTime = Date.now();
         const response = await fetch(targetUrl, {
             method: method,
             headers: headers,
             body: body || undefined
         });
+        const duration = Date.now() - startTime;
         
         const responseHeaders = new Headers();
         for (const [key, value] of response.headers.entries()) {
             responseHeaders.set(key, value);
         }
         responseHeaders.set('X-CF-Colo', request.cf?.colo || 'unknown');
+        responseHeaders.set('X-Response-Time', duration + 'ms');
         responseHeaders.set('Access-Control-Allow-Origin', '*');
         
         return new Response(response.body, {
@@ -208,19 +260,24 @@ async function getIPPoolData(request) {
         city: city,
         region: region,
         asn: request.cf?.asn || 'unknown',
-        timezone: request.cf?.timezone || 'unknown'
+        timezone: request.cf?.timezone || 'unknown',
+        latitude: request.cf?.latitude || 'unknown',
+        longitude: request.cf?.longitude || 'unknown',
+        continent: request.cf?.continent || 'unknown'
     };
     
     const ipPool = [
-        { ip: `${colo}.edge.cloudflare.com`, status: 'ONLINE', latency: Math.floor(Math.random() * 50 + 10), region: country },
-        { ip: `172.64.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`, status: 'ONLINE', latency: Math.floor(Math.random() * 50 + 10), region: country },
-        { ip: `172.67.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`, status: 'ONLINE', latency: Math.floor(Math.random() * 50 + 20), region: country },
-        { ip: `104.21.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`, status: 'ONLINE', latency: Math.floor(Math.random() * 50 + 15), region: country },
-        { ip: `162.159.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`, status: 'ONLINE', latency: Math.floor(Math.random() * 50 + 25), region: country },
+        { ip: `${colo}.edge.cloudflare.com`, status: 'ONLINE', latency: Math.floor(Math.random() * 50 + 10), region: country, type: 'EDGE' },
+        { ip: `172.64.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`, status: 'ONLINE', latency: Math.floor(Math.random() * 50 + 10), region: country, type: 'ANYCAST' },
+        { ip: `172.67.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`, status: 'ONLINE', latency: Math.floor(Math.random() * 50 + 20), region: country, type: 'ANYCAST' },
+        { ip: `104.21.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`, status: 'ONLINE', latency: Math.floor(Math.random() * 50 + 15), region: country, type: 'ANYCAST' },
+        { ip: `162.159.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`, status: 'ONLINE', latency: Math.floor(Math.random() * 50 + 25), region: country, type: 'ANYCAST' },
+        { ip: `104.24.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`, status: 'ONLINE', latency: Math.floor(Math.random() * 50 + 18), region: country, type: 'ANYCAST' },
     ];
     
     return {
         success: true,
+        version: VERSION,
         timestamp: new Date().toISOString(),
         node: nodeInfo,
         pool: ipPool,
@@ -229,16 +286,91 @@ async function getIPPoolData(request) {
     };
 }
 
-function generateCyberpunkPage(request, url) {
+function generateCyberpunkPage(request, url, visitorIP) {
     const colo = request.cf?.colo || 'UNKNOWN';
     const country = request.cf?.country || 'XX';
     const city = request.cf?.city || 'Night City';
+    const region = request.cf?.region || 'Unknown';
+    const asn = request.cf?.asn || 'Unknown';
+    const timezone = request.cf?.timezone || 'UTC';
+    const latitude = request.cf?.latitude || '0';
+    const longitude = request.cf?.longitude || '0';
+    const continent = request.cf?.continent || 'XX';
     const lang = url.searchParams.get('lang') || 'zh';
+    
+    const countryNames = {
+        'JP': '日本', 'CN': '中国', 'US': '美国', 'HK': '香港', 'TW': '台湾',
+        'SG': '新加坡', 'KR': '韩国', 'DE': '德国', 'FR': '法国', 'GB': '英国',
+        'AU': '澳大利亚', 'CA': '加拿大', 'NL': '荷兰', 'IN': '印度', 'RU': '俄罗斯',
+        'BR': '巴西', 'ID': '印度尼西亚', 'TH': '泰国', 'VN': '越南', 'MY': '马来西亚',
+        'PH': '菲律宾', 'IT': '意大利', 'ES': '西班牙', 'MX': '墨西哥', 'AE': '阿联酋'
+    };
+    
+    const cityNames = {
+        // 国际城市
+        'Tokyo': '东京', 'Osaka': '大阪', 'Nagoya': '名古屋', 'Fukuoka': '福冈', 'Sapporo': '札幌',
+        'Singapore': '新加坡', 'Seoul': '首尔', 'Busan': '釜山', 'Taipei': '台北', 'Kaohsiung': '高雄',
+        'London': '伦敦', 'Paris': '巴黎', 'Frankfurt': '法兰克福', 'Amsterdam': '阿姆斯特丹', 'Berlin': '柏林',
+        'New York': '纽约', 'Los Angeles': '洛杉矶', 'San Francisco': '旧金山', 'Chicago': '芝加哥', 'Seattle': '西雅图',
+        'Sydney': '悉尼', 'Melbourne': '墨尔本', 'Toronto': '多伦多', 'Vancouver': '温哥华',
+        'Mumbai': '孟买', 'New Delhi': '新德里', 'Dubai': '迪拜', 'Bangkok': '曼谷',
+        'Kuala Lumpur': '吉隆坡', 'Jakarta': '雅加达', 'Manila': '马尼拉', 'Ho Chi Minh City': '胡志明市', 'Hanoi': '河内',
+        'Moscow': '莫斯科', 'Madrid': '马德里', 'Rome': '罗马', 'Milan': '米兰', 'Vienna': '维也纳',
+        // 中国城市 - 直辖市
+        'Beijing': '北京', 'Shanghai': '上海', 'Tianjin': '天津', 'Chongqing': '重庆',
+        // 中国城市 - 特别行政区
+        'Hong Kong': '香港', 'Macau': '澳门', 'Macao': '澳门',
+        // 中国城市 - 省会及主要城市
+        'Guangzhou': '广州', 'Shenzhen': '深圳', 'Dongguan': '东莞', 'Foshan': '佛山', 'Zhuhai': '珠海', 'Zhongshan': '中山', 'Huizhou': '惠州', 'Jiangmen': '江门', 'Shantou': '汕头', 'Zhanjiang': '湛江',
+        'Nanning': '南宁', 'Guilin': '桂林', 'Liuzhou': '柳州', 'Beihai': '北海',
+        'Chengdu': '成都', 'Mianyang': '绵阳', 'Leshan': '乐山', 'Yibin': '宜宾',
+        'Kunming': '昆明', 'Dali': '大理', 'Lijiang': '丽江',
+        'Guiyang': '贵阳', 'Zunyi': '遵义',
+        'Hangzhou': '杭州', 'Ningbo': '宁波', 'Wenzhou': '温州', 'Jiaxing': '嘉兴', 'Shaoxing': '绍兴', 'Jinhua': '金华',
+        'Nanjing': '南京', 'Suzhou': '苏州', 'Wuxi': '无锡', 'Changzhou': '常州', 'Nantong': '南通', 'Xuzhou': '徐州', 'Yangzhou': '扬州', 'Zhenjiang': '镇江',
+        'Hefei': '合肥', 'Wuhu': '芜湖', 'Bengbu': '蚌埠', 'Anqing': '安庆',
+        'Wuhan': '武汉', 'Yichang': '宜昌', 'Xiangyang': '襄阳', 'Jingzhou': '荆州',
+        'Changsha': '长沙', 'Zhuzhou': '株洲', 'Xiangtan': '湘潭', 'Hengyang': '衡阳',
+        'Nanchang': '南昌', 'Jiujiang': '九江', 'Ganzhou': '赣州',
+        'Fuzhou': '福州', 'Xiamen': '厦门', 'Quanzhou': '泉州', 'Zhangzhou': '漳州', 'Putian': '莆田',
+        'Jinan': '济南', 'Qingdao': '青岛', 'Yantai': '烟台', 'Weifang': '潍坊', 'Zibo': '淄博', 'Linyi': '临沂', 'Weihai': '威海',
+        'Zhengzhou': '郑州', 'Luoyang': '洛阳', 'Kaifeng': '开封', 'Xinxiang': '新乡', 'Nanyang': '南阳',
+        'Shijiazhuang': '石家庄', 'Tangshan': '唐山', 'Baoding': '保定', 'Langfang': '廊坊', 'Handan': '邯郸', 'Qinhuangdao': '秦皇岛',
+        'Taiyuan': '太原', 'Datong': '大同', 'Linfen': '临汾',
+        'Xian': '西安', "Xi'an": '西安', 'Xianyang': '咸阳', 'Baoji': '宝鸡', 'Weinan': '渭南',
+        'Lanzhou': '兰州', 'Tianshui': '天水',
+        'Xining': '西宁',
+        'Yinchuan': '银川',
+        'Shenyang': '沈阳', 'Dalian': '大连', 'Anshan': '鞍山', 'Fushun': '抚顺', 'Jinzhou': '锦州',
+        'Changchun': '长春', 'Jilin City': '吉林市', 'Siping': '四平',
+        'Harbin': '哈尔滨', 'Daqing': '大庆', 'Qiqihar': '齐齐哈尔', 'Mudanjiang': '牡丹江',
+        'Hohhot': '呼和浩特', 'Baotou': '包头', 'Ordos': '鄂尔多斯',
+        'Urumqi': '乌鲁木齐', 'Kashgar': '喀什', 'Korla': '库尔勒',
+        'Lhasa': '拉萨', 'Shigatse': '日喀则',
+        'Haikou': '海口', 'Sanya': '三亚',
+        // 中国省份/地区
+        'Guangdong': '广东', 'Guangxi': '广西', 'Sichuan': '四川', 'Yunnan': '云南', 'Guizhou': '贵州',
+        'Zhejiang': '浙江', 'Jiangsu': '江苏', 'Anhui': '安徽', 'Hubei': '湖北', 'Hunan': '湖南',
+        'Jiangxi': '江西', 'Fujian': '福建', 'Shandong': '山东', 'Henan': '河南', 'Hebei': '河北',
+        'Shanxi': '山西', 'Shaanxi': '陕西', 'Gansu': '甘肃', 'Qinghai': '青海', 'Ningxia': '宁夏',
+        'Liaoning': '辽宁', 'Jilin': '吉林', 'Heilongjiang': '黑龙江',
+        'Inner Mongolia': '内蒙古', 'Xinjiang': '新疆', 'Tibet': '西藏', 'Hainan': '海南', 'Taiwan': '台湾'
+    };
+    
+    const coloNames = {
+        'NRT': '东京成田', 'HND': '东京羽田', 'KIX': '大阪关西', 'HKG': '香港',
+        'SIN': '新加坡', 'ICN': '首尔仁川', 'TPE': '台北桃园', 'PVG': '上海浦东',
+        'PEK': '北京首都', 'LAX': '洛杉矶', 'SFO': '旧金山', 'SEA': '西雅图',
+        'ORD': '芝加哥', 'DFW': '达拉斯', 'IAD': '华盛顿', 'MIA': '迈阿密',
+        'JFK': '纽约', 'LHR': '伦敦', 'CDG': '巴黎', 'FRA': '法兰克福',
+        'AMS': '阿姆斯特丹', 'SYD': '悉尼', 'MEL': '墨尔本', 'YYZ': '多伦多',
+        'BOM': '孟买', 'DXB': '迪拜', 'BKK': '曼谷', 'KUL': '吉隆坡'
+    };
     
     const i18n = {
         zh: {
             subtitle: 'Cloudflare 代理网络',
-            nodeLocation: '节点位置',
+            nodeLocation: '节点代码',
             country: '国家',
             city: '城市',
             status: '状态',
@@ -246,21 +378,43 @@ function generateCyberpunkPage(request, url) {
             poolTitle: '代理 IP 池',
             ipAddress: 'IP 地址',
             latency: '延迟',
-            region: '地区',
+            regionLabel: '地区',
+            type: '类型',
             apiTitle: 'API 接口',
             apiDesc1: '代理请求并返回内容',
             apiDesc2: '代理请求并返回 JSON',
             apiDesc3: '获取代理 IP 池状态',
             apiDesc4: 'Python 客户端代理请求',
+            apiDesc5: '获取服务状态',
+            apiDesc6: '获取调试信息',
             codeTitle: 'Python 使用示例',
             loading: '加载中...',
             error: '加载数据失败',
             langSwitch: 'EN',
-            footer: '由 Cloudflare Workers 驱动'
+            footer: '由 Cloudflare Workers 驱动',
+            nodeInfoTitle: '节点详情',
+            visitorInfoTitle: '访问者信息',
+            visitorIP: '访问者 IP',
+            regionDetail: '地区',
+            timezone: '时区',
+            asn: 'ASN',
+            coordinates: '坐标',
+            continent: '大洲',
+            featuresTitle: '功能特性',
+            feature1: '全球 300+ 边缘节点',
+            feature2: '自动负载均衡',
+            feature3: '低延迟高并发',
+            feature4: 'Python 库支持',
+            feature5: '浏览器自动化',
+            feature6: 'CORS 跨域支持',
+            installTitle: '快速安装',
+            version: '版本',
+            uptime: '运行时间',
+            responseNote: '响应头包含 X-CF-Colo 和 X-Response-Time'
         },
         en: {
             subtitle: 'Cloudflare Proxy Network',
-            nodeLocation: 'Node Location',
+            nodeLocation: 'Node Code',
             country: 'Country',
             city: 'City',
             status: 'Status',
@@ -268,28 +422,66 @@ function generateCyberpunkPage(request, url) {
             poolTitle: 'PROXY IP POOL',
             ipAddress: 'IP ADDRESS',
             latency: 'LATENCY',
-            region: 'REGION',
+            regionLabel: 'REGION',
+            type: 'TYPE',
             apiTitle: 'API ENDPOINTS',
             apiDesc1: 'Proxy request and return content',
             apiDesc2: 'Proxy request and return JSON',
             apiDesc3: 'Get proxy IP pool status',
             apiDesc4: 'Python client proxy request',
+            apiDesc5: 'Get service status',
+            apiDesc6: 'Get debug information',
             codeTitle: 'Python Example',
             loading: 'LOADING...',
             error: 'ERROR LOADING DATA',
             langSwitch: '中文',
-            footer: 'Powered by Cloudflare Workers'
+            footer: 'Powered by Cloudflare Workers',
+            nodeInfoTitle: 'Node Details',
+            visitorInfoTitle: 'Visitor Information',
+            visitorIP: 'Visitor IP',
+            regionDetail: 'Region',
+            timezone: 'Timezone',
+            asn: 'ASN',
+            coordinates: 'Coordinates',
+            continent: 'Continent',
+            featuresTitle: 'Features',
+            feature1: '300+ Global Edge Nodes',
+            feature2: 'Auto Load Balancing',
+            feature3: 'Low Latency & High Concurrency',
+            feature4: 'Python Library Support',
+            feature5: 'Browser Automation',
+            feature6: 'CORS Support',
+            installTitle: 'Quick Install',
+            version: 'Version',
+            uptime: 'Uptime',
+            responseNote: 'Response headers include X-CF-Colo and X-Response-Time'
         }
     };
     
     const t = i18n[lang] || i18n.zh;
     const switchLang = lang === 'zh' ? 'en' : 'zh';
+    const continentNames = {
+        'AF': lang === 'zh' ? '非洲' : 'Africa',
+        'AN': lang === 'zh' ? '南极洲' : 'Antarctica',
+        'AS': lang === 'zh' ? '亚洲' : 'Asia',
+        'EU': lang === 'zh' ? '欧洲' : 'Europe',
+        'NA': lang === 'zh' ? '北美洲' : 'North America',
+        'OC': lang === 'zh' ? '大洋洲' : 'Oceania',
+        'SA': lang === 'zh' ? '南美洲' : 'South America'
+    };
+    
+    const displayColo = lang === 'zh' ? (coloNames[colo] || colo) : colo;
+    const displayCountry = lang === 'zh' ? (countryNames[country] || country) : country;
+    const displayCity = lang === 'zh' ? (cityNames[city] || city) : city;
+    const displayRegion = lang === 'zh' ? (cityNames[region] || region) : region;
     
     return `<!DOCTYPE html>
 <html lang="${lang === 'zh' ? 'zh-CN' : 'en'}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="CFspider - ${t.subtitle}">
+    <meta name="keywords" content="cloudflare, proxy, ip pool, workers, python, crawler">
     <title>CFSPIDER // PROXY NETWORK</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
     <style>
@@ -300,6 +492,7 @@ function generateCyberpunkPage(request, url) {
             --cyber-blue: #05d9e8;
             --cyber-dark: #0d0221;
             --cyber-purple: #7b2cbf;
+            --cyber-green: #00ff88;
             --grid-color: rgba(0, 240, 255, 0.1);
         }
         
@@ -354,7 +547,7 @@ function generateCyberpunkPage(request, url) {
         }
         
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             padding: 40px 20px;
             position: relative;
@@ -387,7 +580,7 @@ function generateCyberpunkPage(request, url) {
         
         .header {
             text-align: center;
-            margin-bottom: 60px;
+            margin-bottom: 50px;
             position: relative;
         }
         
@@ -402,6 +595,17 @@ function generateCyberpunkPage(request, url) {
             text-shadow: 0 0 40px rgba(252, 238, 10, 0.5);
             animation: glitch 3s infinite;
             position: relative;
+        }
+        
+        .version-badge {
+            display: inline-block;
+            background: var(--cyber-magenta);
+            color: #fff;
+            padding: 4px 12px;
+            font-size: 0.8rem;
+            font-family: 'Orbitron', sans-serif;
+            margin-left: 10px;
+            vertical-align: super;
         }
         
         @keyframes glitch {
@@ -419,22 +623,21 @@ function generateCyberpunkPage(request, url) {
             text-transform: uppercase;
         }
         
-        .status-grid {
+        .info-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 25px;
             margin-bottom: 40px;
         }
         
-        .status-card {
-            background: linear-gradient(135deg, rgba(0, 240, 255, 0.1) 0%, rgba(123, 44, 191, 0.1) 100%);
+        .info-panel {
+            background: rgba(0, 0, 0, 0.6);
             border: 1px solid var(--cyber-cyan);
             padding: 25px;
             position: relative;
-            clip-path: polygon(0 0, calc(100% - 15px) 0, 100% 15px, 100% 100%, 15px 100%, 0 calc(100% - 15px));
         }
         
-        .status-card::before {
+        .info-panel::before {
             content: '';
             position: absolute;
             top: 0;
@@ -450,19 +653,94 @@ function generateCyberpunkPage(request, url) {
             100% { transform: translateX(100%); }
         }
         
+        .panel-title {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 0.9rem;
+            color: var(--cyber-cyan);
+            letter-spacing: 0.15em;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(0, 240, 255, 0.3);
+        }
+        
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .info-label {
+            color: #888;
+            font-size: 0.9rem;
+        }
+        
+        .info-value {
+            color: var(--cyber-yellow);
+            font-weight: bold;
+            font-family: 'Orbitron', sans-serif;
+        }
+        
+        .info-value.online {
+            color: var(--cyber-green);
+            text-shadow: 0 0 10px var(--cyber-green);
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 40px;
+        }
+        
+        .status-card {
+            background: linear-gradient(135deg, rgba(0, 240, 255, 0.1) 0%, rgba(123, 44, 191, 0.1) 100%);
+            border: 1px solid var(--cyber-cyan);
+            padding: 20px;
+            text-align: center;
+            position: relative;
+            clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+        }
+        
         .status-label {
-            font-size: 0.75rem;
+            font-size: 0.7rem;
             color: var(--cyber-cyan);
             text-transform: uppercase;
-            letter-spacing: 0.2em;
+            letter-spacing: 0.15em;
             margin-bottom: 8px;
         }
         
         .status-value {
             font-family: 'Orbitron', sans-serif;
-            font-size: 1.5rem;
+            font-size: 1.3rem;
             font-weight: 700;
             color: var(--cyber-yellow);
+        }
+        
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin-bottom: 40px;
+        }
+        
+        .feature-card {
+            background: rgba(123, 44, 191, 0.15);
+            border: 1px solid var(--cyber-purple);
+            padding: 20px;
+            text-align: center;
+            transition: all 0.3s;
+        }
+        
+        .feature-card:hover {
+            background: rgba(123, 44, 191, 0.3);
+            transform: translateY(-3px);
+            box-shadow: 0 5px 20px rgba(123, 44, 191, 0.4);
+        }
+        
+        .feature-text {
+            color: #ddd;
+            font-size: 0.95rem;
         }
         
         .pool-section {
@@ -495,15 +773,15 @@ function generateCyberpunkPage(request, url) {
             text-align: left;
             padding: 15px 10px;
             color: var(--cyber-cyan);
-            font-size: 0.8rem;
+            font-size: 0.75rem;
             letter-spacing: 0.15em;
             border-bottom: 1px solid var(--cyber-cyan);
         }
         
         .pool-table td {
-            padding: 15px 12px;
+            padding: 12px 10px;
             border-bottom: 1px solid rgba(0, 240, 255, 0.2);
-            font-size: 1rem;
+            font-size: 0.95rem;
             color: #ddd;
         }
         
@@ -520,6 +798,9 @@ function generateCyberpunkPage(request, url) {
         .latency-medium { color: var(--cyber-yellow); }
         .latency-bad { color: var(--cyber-magenta); }
         
+        .type-edge { color: var(--cyber-magenta); }
+        .type-anycast { color: var(--cyber-cyan); }
+        
         .api-section {
             background: rgba(0, 0, 0, 0.5);
             border: 1px solid var(--cyber-blue);
@@ -529,17 +810,22 @@ function generateCyberpunkPage(request, url) {
         
         .api-section h2 {
             font-family: 'Orbitron', sans-serif;
-            font-size: 1.2rem;
+            font-size: 1.1rem;
             color: var(--cyber-blue);
             margin-bottom: 25px;
             letter-spacing: 0.2em;
+        }
+        
+        .api-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 15px;
         }
         
         .api-item {
             background: rgba(5, 217, 232, 0.1);
             border-left: 3px solid var(--cyber-cyan);
             padding: 15px 20px;
-            margin-bottom: 15px;
             transition: all 0.3s;
         }
         
@@ -550,10 +836,10 @@ function generateCyberpunkPage(request, url) {
         
         .api-method {
             display: inline-block;
-            padding: 3px 10px;
+            padding: 2px 8px;
             background: var(--cyber-cyan);
             color: var(--cyber-dark);
-            font-size: 0.7rem;
+            font-size: 0.65rem;
             font-weight: bold;
             margin-right: 10px;
         }
@@ -561,18 +847,44 @@ function generateCyberpunkPage(request, url) {
         .api-path {
             color: var(--cyber-yellow);
             font-family: 'Share Tech Mono', monospace;
+            font-size: 0.9rem;
         }
         
         .api-desc {
             color: #aaa;
-            font-size: 0.95rem;
-            margin-top: 8px;
+            font-size: 0.85rem;
+            margin-top: 6px;
+        }
+        
+        .install-section {
+            background: rgba(0, 255, 136, 0.1);
+            border: 1px solid var(--cyber-green);
+            padding: 25px;
+            margin-bottom: 40px;
+            text-align: center;
+        }
+        
+        .install-section h3 {
+            font-family: 'Orbitron', sans-serif;
+            color: var(--cyber-green);
+            margin-bottom: 15px;
+            letter-spacing: 0.15em;
+        }
+        
+        .install-cmd {
+            background: #0a0a0a;
+            padding: 15px 25px;
+            display: inline-block;
+            font-size: 1.1rem;
+            color: var(--cyber-green);
+            border: 1px solid rgba(0, 255, 136, 0.3);
+            user-select: all;
         }
         
         .code-section {
-            background: #0d0d0d;
+            background: #0a0a0a;
             border: 2px solid var(--cyber-purple);
-            padding: 30px;
+            padding: 25px;
             margin-bottom: 40px;
             position: relative;
             overflow: hidden;
@@ -582,18 +894,18 @@ function generateCyberpunkPage(request, url) {
         .code-section::before {
             content: '${t.codeTitle}';
             position: absolute;
-            top: 10px;
+            top: 8px;
             right: 15px;
-            font-size: 0.8rem;
+            font-size: 0.75rem;
             color: var(--cyber-purple);
-            letter-spacing: 0.2em;
+            letter-spacing: 0.15em;
             font-weight: bold;
         }
         
         .code-section pre {
             color: #ffffff;
-            font-size: 1.1rem;
-            line-height: 1.8;
+            font-size: 1rem;
+            line-height: 1.7;
             overflow-x: auto;
             text-shadow: 0 0 5px rgba(255,255,255,0.1);
         }
@@ -606,9 +918,9 @@ function generateCyberpunkPage(request, url) {
         .footer {
             text-align: center;
             padding: 40px 0;
-            color: #888;
-            font-size: 1rem;
-            letter-spacing: 0.2em;
+            color: #666;
+            font-size: 0.9rem;
+            letter-spacing: 0.15em;
         }
         
         .footer a {
@@ -616,12 +928,17 @@ function generateCyberpunkPage(request, url) {
             text-decoration: none;
             font-weight: bold;
             text-shadow: 0 0 10px var(--cyber-cyan);
+            margin: 0 10px;
+        }
+        
+        .footer a:hover {
+            color: var(--cyber-yellow);
         }
         
         .cursor {
             display: inline-block;
             width: 10px;
-            height: 1.2em;
+            height: 1.1em;
             background: var(--cyber-cyan);
             animation: blink 1s step-end infinite;
             vertical-align: middle;
@@ -634,8 +951,8 @@ function generateCyberpunkPage(request, url) {
         
         .loading {
             display: inline-block;
-            width: 20px;
-            height: 20px;
+            width: 18px;
+            height: 18px;
             border: 2px solid var(--cyber-cyan);
             border-top-color: transparent;
             border-radius: 50%;
@@ -646,10 +963,22 @@ function generateCyberpunkPage(request, url) {
             to { transform: rotate(360deg); }
         }
         
+        .note {
+            background: rgba(252, 238, 10, 0.1);
+            border-left: 3px solid var(--cyber-yellow);
+            padding: 12px 18px;
+            margin-top: 15px;
+            color: #ccc;
+            font-size: 0.85rem;
+        }
+        
         @media (max-width: 768px) {
             .logo { font-size: 2.5rem; }
-            .subtitle { font-size: 0.9rem; letter-spacing: 0.2em; }
+            .subtitle { font-size: 0.85rem; letter-spacing: 0.2em; }
             .status-grid { grid-template-columns: repeat(2, 1fr); }
+            .info-grid { grid-template-columns: 1fr; }
+            .api-grid { grid-template-columns: 1fr; }
+            .features-grid { grid-template-columns: repeat(2, 1fr); }
         }
     </style>
 </head>
@@ -660,26 +989,109 @@ function generateCyberpunkPage(request, url) {
     
     <div class="container">
         <header class="header">
-            <h1 class="logo">CFSPIDER</h1>
+            <h1 class="logo">CFSPIDER<span class="version-badge">v${VERSION}</span></h1>
             <p class="subtitle">${t.subtitle}</p>
         </header>
         
         <div class="status-grid">
             <div class="status-card">
                 <div class="status-label">${t.nodeLocation}</div>
-                <div class="status-value">${colo}</div>
+                <div class="status-value">${displayColo}</div>
             </div>
             <div class="status-card">
                 <div class="status-label">${t.country}</div>
-                <div class="status-value">${country}</div>
+                <div class="status-value">${displayCountry}</div>
             </div>
             <div class="status-card">
                 <div class="status-label">${t.city}</div>
-                <div class="status-value">${city}</div>
+                <div class="status-value">${displayCity}</div>
+            </div>
+            <div class="status-card">
+                <div class="status-label">${t.continent}</div>
+                <div class="status-value">${continentNames[continent] || continent}</div>
             </div>
             <div class="status-card">
                 <div class="status-label">${t.status}</div>
                 <div class="status-value status-online">${t.online}</div>
+            </div>
+            <div class="status-card">
+                <div class="status-label">${t.version}</div>
+                <div class="status-value">${VERSION}</div>
+            </div>
+        </div>
+        
+        <div class="info-grid">
+            <div class="info-panel">
+                <div class="panel-title">// ${t.nodeInfoTitle}</div>
+                <div class="info-row">
+                    <span class="info-label">${t.nodeLocation}</span>
+                    <span class="info-value">${displayColo}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">${t.country}</span>
+                    <span class="info-value">${displayCountry}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">${t.city}</span>
+                    <span class="info-value">${displayCity}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">${t.regionDetail}</span>
+                    <span class="info-value">${displayRegion}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">${t.asn}</span>
+                    <span class="info-value">AS${asn}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">${t.timezone}</span>
+                    <span class="info-value">${timezone}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">${t.coordinates}</span>
+                    <span class="info-value">${latitude}, ${longitude}</span>
+                </div>
+            </div>
+            
+            <div class="info-panel">
+                <div class="panel-title">// ${t.visitorInfoTitle}</div>
+                <div class="info-row">
+                    <span class="info-label">${t.visitorIP}</span>
+                    <span class="info-value">${visitorIP}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">${t.country}</span>
+                    <span class="info-value">${displayCountry}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">${t.asn}</span>
+                    <span class="info-value">AS${asn}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">${t.status}</span>
+                    <span class="info-value online">${t.online}</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-text">${t.feature1}</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-text">${t.feature2}</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-text">${t.feature3}</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-text">${t.feature4}</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-text">${t.feature5}</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-text">${t.feature6}</div>
             </div>
         </div>
         
@@ -688,39 +1100,58 @@ function generateCyberpunkPage(request, url) {
                 <thead>
                     <tr>
                         <th>${t.ipAddress}</th>
+                        <th>${t.type}</th>
                         <th>${t.status}</th>
                         <th>${t.latency}</th>
-                        <th>${t.region}</th>
+                        <th>${t.regionLabel}</th>
                     </tr>
                 </thead>
                 <tbody id="poolBody">
-                    <tr><td colspan="4" style="text-align:center;"><span class="loading"></span> ${t.loading}</td></tr>
+                    <tr><td colspan="5" style="text-align:center;"><span class="loading"></span> ${t.loading}</td></tr>
                 </tbody>
             </table>
         </div>
         
         <div class="api-section">
             <h2>// ${t.apiTitle}</h2>
-            <div class="api-item">
-                <span class="api-method">GET</span>
-                <span class="api-path">/api/fetch?url=https://example.com</span>
-                <div class="api-desc">${t.apiDesc1}</div>
+            <div class="api-grid">
+                <div class="api-item">
+                    <span class="api-method">GET</span>
+                    <span class="api-path">/api/fetch?url=https://example.com</span>
+                    <div class="api-desc">${t.apiDesc1}</div>
+                </div>
+                <div class="api-item">
+                    <span class="api-method">GET</span>
+                    <span class="api-path">/api/json?url=https://httpbin.org/ip</span>
+                    <div class="api-desc">${t.apiDesc2}</div>
+                </div>
+                <div class="api-item">
+                    <span class="api-method">GET</span>
+                    <span class="api-path">/api/pool</span>
+                    <div class="api-desc">${t.apiDesc3}</div>
+                </div>
+                <div class="api-item">
+                    <span class="api-method">POST</span>
+                    <span class="api-path">/proxy?url=...&method=GET</span>
+                    <div class="api-desc">${t.apiDesc4}</div>
+                </div>
+                <div class="api-item">
+                    <span class="api-method">GET</span>
+                    <span class="api-path">/api/status</span>
+                    <div class="api-desc">${t.apiDesc5}</div>
+                </div>
+                <div class="api-item">
+                    <span class="api-method">GET</span>
+                    <span class="api-path">/debug</span>
+                    <div class="api-desc">${t.apiDesc6}</div>
+                </div>
             </div>
-            <div class="api-item">
-                <span class="api-method">GET</span>
-                <span class="api-path">/api/json?url=https://httpbin.org/ip</span>
-                <div class="api-desc">${t.apiDesc2}</div>
-            </div>
-            <div class="api-item">
-                <span class="api-method">GET</span>
-                <span class="api-path">/api/pool</span>
-                <div class="api-desc">${t.apiDesc3}</div>
-            </div>
-            <div class="api-item">
-                <span class="api-method">POST</span>
-                <span class="api-path">/proxy?url=...&method=GET</span>
-                <div class="api-desc">${t.apiDesc4}</div>
-            </div>
+            <div class="note">${t.responseNote}</div>
+        </div>
+        
+        <div class="install-section">
+            <h3>// ${t.installTitle}</h3>
+            <div class="install-cmd">pip install cfspider</div>
         </div>
         
         <div class="code-section">
@@ -729,16 +1160,37 @@ function generateCyberpunkPage(request, url) {
 
 cf_proxies = <span class="code-string">"https://your-workers.dev"</span>
 
+<span class="code-comment"># GET request</span>
 response = cfspider.<span class="code-function">get</span>(
     <span class="code-string">"https://httpbin.org/ip"</span>,
     cf_proxies=cf_proxies
 )
-<span class="code-function">print</span>(response.text)  <span class="code-comment"># Cloudflare IP</span></pre>
+<span class="code-function">print</span>(response.text)
+<span class="code-function">print</span>(response.cf_colo)  <span class="code-comment"># Cloudflare node</span>
+
+<span class="code-comment"># POST request</span>
+response = cfspider.<span class="code-function">post</span>(
+    <span class="code-string">"https://httpbin.org/post"</span>,
+    cf_proxies=cf_proxies,
+    json={<span class="code-string">"key"</span>: <span class="code-string">"value"</span>}
+)
+
+<span class="code-comment"># Browser automation</span>
+<span class="code-keyword">from</span> cfspider <span class="code-keyword">import</span> Browser
+
+browser = Browser(headless=<span class="code-keyword">True</span>)
+html = browser.<span class="code-function">get_html</span>(<span class="code-string">"https://example.com"</span>)
+browser.<span class="code-function">close</span>()</pre>
         </div>
         
         <footer class="footer">
-            <p>CFSPIDER v1.0.0 // <a href="https://github.com/violettoolssite/CFspider" target="_blank">GITHUB</a> // <a href="https://pypi.org/project/cfspider/" target="_blank">PYPI</a></p>
-            <p style="margin-top:10px;">${t.footer}<span class="cursor"></span></p>
+            <p>CFSPIDER v${VERSION}</p>
+            <p style="margin-top:15px;">
+                <a href="https://github.com/violettoolssite/CFspider" target="_blank">GITHUB</a>
+                <a href="https://pypi.org/project/cfspider/" target="_blank">PYPI</a>
+                <a href="https://spider.violetteam.cloud" target="_blank">DOCS</a>
+            </p>
+            <p style="margin-top:15px;">${t.footer}<span class="cursor"></span></p>
         </footer>
     </div>
     
@@ -755,8 +1207,10 @@ response = cfspider.<span class="code-function">get</span>(
                     tbody.innerHTML = data.pool.map(item => {
                         const latencyClass = item.latency < 30 ? 'latency-good' : 
                                            item.latency < 60 ? 'latency-medium' : 'latency-bad';
+                        const typeClass = item.type === 'EDGE' ? 'type-edge' : 'type-anycast';
                         return \`<tr>
                             <td style="font-family:'Share Tech Mono',monospace;color:#fff;">\${item.ip}</td>
+                            <td class="\${typeClass}">\${item.type}</td>
                             <td class="status-online">\${item.status}</td>
                             <td class="\${latencyClass}">\${item.latency}ms</td>
                             <td>\${item.region}</td>
@@ -765,7 +1219,7 @@ response = cfspider.<span class="code-function">get</span>(
                 }
             } catch (e) {
                 document.getElementById('poolBody').innerHTML = 
-                    '<tr><td colspan="4" style="color:#ff2a6d;">' + errorMsg + '</td></tr>';
+                    '<tr><td colspan="5" style="color:#ff2a6d;">' + errorMsg + '</td></tr>';
             }
         }
         
