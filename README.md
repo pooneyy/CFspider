@@ -111,6 +111,9 @@ Cloudflare Workers 免费版每日 100,000 请求，无需信用卡，无需付�
 - 返回 Cloudflare 节点信息（cf_colo、cf_ray）
 - **支持浏览器模式**，可渲染 JavaScript 动态页面、截图、自动化操作
 - **支持多种代理方式**：HTTP 代理、SOCKS5 代理、edgetunnel VLESS 代理
+- **支持异步请求**（基于 httpx），可使用 async/await 语法
+- **支持 HTTP/2 协议**，更快的连接复用和性能
+- **支持流式响应**，高效处理大文件下载
 - 完全免费，Workers 免费版每日 100,000 请求
 
 ## 测试结果
@@ -381,6 +384,134 @@ response = cfspider.get(
     timeout=10
 )
 ```
+
+### HTTP/2 支持
+
+启用 HTTP/2 可以获得更好的性能（连接复用、头部压缩等）：
+
+```python
+import cfspider
+
+cf_proxies = "https://your-workers.dev"
+
+# 同步请求启用 HTTP/2
+response = cfspider.get(
+    "https://httpbin.org/ip",
+    cf_proxies=cf_proxies,
+    http2=True
+)
+
+print(response.text)
+```
+
+## 异步 API（httpx）
+
+CFspider 提供基于 httpx 的异步 API，支持 async/await 语法，适合高并发场景。
+
+### 异步请求
+
+```python
+import asyncio
+import cfspider
+
+async def main():
+    cf_proxies = "https://your-workers.dev"
+    
+    # 异步 GET 请求
+    response = await cfspider.aget("https://httpbin.org/ip", cf_proxies=cf_proxies)
+    print(response.text)
+    
+    # 异步 POST 请求
+    response = await cfspider.apost(
+        "https://httpbin.org/post",
+        cf_proxies=cf_proxies,
+        json={"key": "value"}
+    )
+    print(response.json())
+
+asyncio.run(main())
+```
+
+### 异步 Session
+
+```python
+import asyncio
+import cfspider
+
+async def main():
+    cf_proxies = "https://your-workers.dev"
+    
+    async with cfspider.AsyncSession(cf_proxies=cf_proxies) as session:
+        # 复用连接，高效执行多个请求
+        r1 = await session.get("https://httpbin.org/ip")
+        r2 = await session.post("https://httpbin.org/post", json={"test": 1})
+        r3 = await session.get("https://example.com")
+        
+        print(r1.text)
+        print(r2.json())
+
+asyncio.run(main())
+```
+
+### 流式响应（大文件下载）
+
+```python
+import asyncio
+import cfspider
+
+async def download_large_file():
+    cf_proxies = "https://your-workers.dev"
+    
+    async with cfspider.astream("GET", "https://example.com/large-file.zip", cf_proxies=cf_proxies) as response:
+        with open("large-file.zip", "wb") as f:
+            async for chunk in response.aiter_bytes(chunk_size=8192):
+                f.write(chunk)
+
+asyncio.run(download_large_file())
+```
+
+### 并发请求
+
+```python
+import asyncio
+import cfspider
+
+async def fetch_url(url, cf_proxies):
+    response = await cfspider.aget(url, cf_proxies=cf_proxies)
+    return response.json()
+
+async def main():
+    cf_proxies = "https://your-workers.dev"
+    
+    urls = [
+        "https://httpbin.org/ip",
+        "https://httpbin.org/headers",
+        "https://httpbin.org/user-agent"
+    ]
+    
+    # 并发执行所有请求
+    tasks = [fetch_url(url, cf_proxies) for url in urls]
+    results = await asyncio.gather(*tasks)
+    
+    for result in results:
+        print(result)
+
+asyncio.run(main())
+```
+
+### 异步 API 参考
+
+| 方法 | 说明 |
+|------|------|
+| `cfspider.aget(url, **kwargs)` | 异步 GET 请求 |
+| `cfspider.apost(url, **kwargs)` | 异步 POST 请求 |
+| `cfspider.aput(url, **kwargs)` | 异步 PUT 请求 |
+| `cfspider.adelete(url, **kwargs)` | 异步 DELETE 请求 |
+| `cfspider.ahead(url, **kwargs)` | 异步 HEAD 请求 |
+| `cfspider.aoptions(url, **kwargs)` | 异步 OPTIONS 请求 |
+| `cfspider.apatch(url, **kwargs)` | 异步 PATCH 请求 |
+| `cfspider.astream(method, url, **kwargs)` | 流式请求（上下文管理器） |
+| `cfspider.AsyncSession(**kwargs)` | 异步会话（支持连接池） |
 
 ## 浏览器模式
 
