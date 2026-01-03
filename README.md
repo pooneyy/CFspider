@@ -518,28 +518,23 @@ asyncio.run(main())
 
 CFspider 集成了 curl_cffi，支持模拟各种浏览器的 TLS 指纹，有效绕过基于 JA3/JA4 指纹的反爬检测。
 
-### 基本用法
+### 基本用法（直接在 get/post 中使用）
 
 ```python
 import cfspider
 
-# 模拟 Chrome 131 发送请求
-response = cfspider.impersonate_get(
+# 直接在 get() 中使用 impersonate 参数
+response = cfspider.get(
     "https://example.com",
     impersonate="chrome131"
 )
 print(response.text)
 
-# 模拟 Safari 18
-response = cfspider.impersonate_get(
-    "https://example.com",
-    impersonate="safari18_0"
-)
-
-# 模拟 Firefox 133
-response = cfspider.impersonate_get(
-    "https://example.com",
-    impersonate="firefox133"
+# POST 请求也支持
+response = cfspider.post(
+    "https://api.example.com",
+    impersonate="safari18_0",
+    json={"key": "value"}
 )
 ```
 
@@ -549,7 +544,7 @@ response = cfspider.impersonate_get(
 import cfspider
 
 # TLS 指纹 + Cloudflare IP 出口
-response = cfspider.impersonate_get(
+response = cfspider.get(
     "https://httpbin.org/ip",
     impersonate="chrome131",
     cf_proxies="https://your-workers.dev"
