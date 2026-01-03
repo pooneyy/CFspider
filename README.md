@@ -283,17 +283,20 @@ cfspider.install_browser()
 ```python
 import cfspider
 
-# 直接使用（无代理）
-browser = cfspider.Browser()
-
-# 或使用自定义代理（HTTP/SOCKS5）
-# browser = cfspider.Browser(proxy="http://127.0.0.1:20000")
+# 通过 edgetunnel Workers 代理（使用 Cloudflare IP 出口）
+browser = cfspider.Browser(
+    cf_proxies="v2.kami666.xyz",  # 你的 edgetunnel Workers 地址
+    vless_uuid="你的-vless-uuid"   # 你的 VLESS UUID
+)
 
 # 获取 JavaScript 渲染后的完整 HTML
 html = browser.html("https://example.com")
 print(html)
 
 browser.close()
+
+# 也可以直接使用（无代理）
+# browser = cfspider.Browser()
 ```
 
 ### 页面截图
