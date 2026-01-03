@@ -10,7 +10,21 @@
 - 支持 Session 会话管理
 - 返回 Cloudflare 节点信息（cf_colo、cf_ray）
 - **支持浏览器模式**，可渲染 JavaScript 动态页面、截图、自动化操作
+- **支持多种代理方式**：HTTP 代理、SOCKS5 代理、edgetunnel VLESS 代理
 - 完全免费，Workers 免费版每日 100,000 请求
+
+## 测试结果
+
+| 功能 | 状态 | 说明 |
+|------|------|------|
+| HTTP GET 请求 | OK | 返回 Cloudflare IP |
+| HTTP POST 请求 | OK | 发送数据成功 |
+| 自定义 Headers | OK | Header 正确传递 |
+| Session 会话 | OK | 多次请求正常 |
+| Workers Debug | OK | 返回 CF 机房信息 |
+| 浏览器(HTTP代理) | OK | 支持本地/远程代理 |
+| 浏览器(VLESS) | OK | Cloudflare IP 出口 |
+| 浏览器(无代理) | OK | 本地 IP 出口 |
 
 ## 部署 Workers
 
@@ -68,17 +82,21 @@ pip install cfspider -i https://pypi.mirrors.ustc.edu.cn/simple
 pip install git+https://github.com/violettoolssite/CFspider.git
 ```
 
-### 方式四：手动安装
+### 安装浏览器功能（可选）
 
-从官网下载 `cfspider.zip` 后解压：
+如需使用浏览器模式，需要额外安装：
 
 ```bash
-# 下载地址：https://spider.violetteam.cloud/cfspider.zip
-unzip cfspider.zip
-pip install ./cfspider
+# 安装带浏览器支持的 cfspider
+pip install cfspider[browser]
+
+# 安装 Chromium 浏览器
+cfspider install
 ```
 
 ## 快速开始
+
+### HTTP 代理请求
 
 ```python
 import cfspider
@@ -86,8 +104,34 @@ import cfspider
 cf_proxies = "https://your-workers.dev"
 
 response = cfspider.get("https://httpbin.org/ip", cf_proxies=cf_proxies)
-
 print(response.text)
+# {"origin": "2a06:98c0:3600::103, 172.71.24.151"}  # Cloudflare IP
+```
+
+### 浏览器模式
+
+```python
+import cfspider
+
+# 使用本地 HTTP 代理
+browser = cfspider.Browser(cf_proxies="127.0.0.1:9674")
+html = browser.html("https://httpbin.org/ip")
+print(html)
+browser.close()
+
+# 使用 edgetunnel VLESS 代理（Cloudflare IP 出口）
+browser = cfspider.Browser(
+    cf_proxies="v2.example.com",
+    vless_uuid="your-vless-uuid"
+)
+html = browser.html("https://httpbin.org/ip")
+print(html)  # 返回 Cloudflare IP
+browser.close()
+
+# 无代理模式
+browser = cfspider.Browser()
+html = browser.html("https://example.com")
+browser.close()
 ```
 
 ## API 参考
@@ -238,30 +282,11 @@ response = cfspider.get(
 )
 ```
 
-## 错误处理
-
-```python
-import cfspider
-
-cf_proxies = "https://your-workers.dev"
-
-try:
-    response = cfspider.get("https://httpbin.org/ip", cf_proxies=cf_proxies)
-    response.raise_for_status()
-    print(response.text)
-except cfspider.CFSpiderError as e:
-    print(f"请求失败: {e}")
-except Exception as e:
-    print(f"其他错误: {e}")
-```
-
 ## 浏览器模式
 
 CFspider 支持浏览器模式，可以渲染 JavaScript 动态页面、截图、生成 PDF、自动化操作等。
 
-### 安装浏览器
-
-首先安装浏览器功能依赖和 Chromium：
+### 安装
 
 ```bash
 # 安装带浏览器支持的 cfspider
@@ -271,11 +296,30 @@ pip install cfspider[browser]
 cfspider install
 ```
 
-或者使用 Python 代码安装：
+### 代理类型支持
+
+浏览器模式支持多种代理类型：
 
 ```python
 import cfspider
-cfspider.install_browser()
+
+# 1. HTTP 代理（IP:PORT 格式）
+browser = cfspider.Browser(cf_proxies="127.0.0.1:9674")
+
+# 2. HTTP 代理（完整格式）
+browser = cfspider.Browser(cf_proxies="http://127.0.0.1:9674")
+
+# 3. SOCKS5 代理
+browser = cfspider.Browser(cf_proxies="socks5://127.0.0.1:1080")
+
+# 4. edgetunnel VLESS 代理（Cloudflare IP 出口）
+browser = cfspider.Browser(
+    cf_proxies="v2.example.com",
+    vless_uuid="your-vless-uuid"
+)
+
+# 5. 无代理
+browser = cfspider.Browser()
 ```
 
 ### 获取渲染后的 HTML
@@ -283,20 +327,13 @@ cfspider.install_browser()
 ```python
 import cfspider
 
-# 通过 edgetunnel Workers 代理（使用 Cloudflare IP 出口）
-browser = cfspider.Browser(
-    cf_proxies="v2.kami666.xyz",  # 你的 edgetunnel Workers 地址
-    vless_uuid="你的-vless-uuid"   # 你的 VLESS UUID
-)
+browser = cfspider.Browser(cf_proxies="127.0.0.1:9674")
 
 # 获取 JavaScript 渲染后的完整 HTML
 html = browser.html("https://example.com")
 print(html)
 
 browser.close()
-
-# 也可以直接使用（无代理）
-# browser = cfspider.Browser()
 ```
 
 ### 页面截图
@@ -363,8 +400,8 @@ import cfspider
 browser = cfspider.Browser()
 
 # 在页面中执行 JavaScript
-result = browser.execute_script("https://example.com", "return document.title")
-print(result)
+result = browser.execute_script("https://example.com", "document.title")
+print(result)  # Example Domain
 
 browser.close()
 ```
@@ -394,6 +431,34 @@ page = browser.get("https://example.com")
 browser.close()
 ```
 
+## 错误处理
+
+```python
+import cfspider
+
+cf_proxies = "https://your-workers.dev"
+
+try:
+    response = cfspider.get("https://httpbin.org/ip", cf_proxies=cf_proxies)
+    response.raise_for_status()
+    print(response.text)
+except cfspider.CFSpiderError as e:
+    print(f"请求失败: {e}")
+except Exception as e:
+    print(f"其他错误: {e}")
+```
+
+## Workers API 接口
+
+| 方法 | 接口 | 说明 |
+|------|------|------|
+| GET | /api/fetch?url=... | 代理请求目标 URL，返回原始内容 |
+| GET | /api/json?url=... | 代理请求目标 URL，返回 JSON（含节点信息） |
+| GET | /api/pool | 获取当前节点的 IP 池状态信息 |
+| GET | /api/proxyip | 获取当前使用的 Proxy IP 和节点代码 |
+| POST | /proxy?url=...&method=... | Python 客户端使用的代理接口 |
+| GET | /debug | 调试接口，返回当前请求的详细信息 |
+
 ## 注意事项
 
 1. Workers 免费版限制：每日 100,000 请求，单次 CPU 时间 10ms
@@ -401,6 +466,7 @@ browser.close()
 3. 超时限制：免费版 30 秒，付费版无限制
 4. 不支持 WebSocket、gRPC 等非 HTTP 协议
 5. 浏览器模式需要额外安装 `playwright` 和 Chromium
+6. edgetunnel VLESS 代理需要单独部署 edgetunnel Workers
 
 ## License
 
