@@ -110,7 +110,7 @@ Cloudflare Workers 免费版每日 100,000 请求，无需信用卡，无需付�
 - 支持 Session 会话管理
 - 返回 Cloudflare 节点信息（cf_colo、cf_ray）
 - **支持浏览器模式**，可渲染 JavaScript 动态页面、截图、自动化操作
-- **支持多种代理方式**：HTTP 代理、SOCKS5 代理、edgetunnel VLESS 代理
+- **支持多种代理方式**：HTTP 代理、SOCKS5 代理、VLESS 链接（支持直接填写完整链接）
 - **支持异步请求**（基于 httpx），可使用 async/await 语法
 - **支持 HTTP/2 协议**，更快的连接复用和性能
 - **支持流式响应**，高效处理大文件下载
@@ -225,13 +225,20 @@ html = browser.html("https://httpbin.org/ip")
 print(html)
 browser.close()
 
-# 使用 edgetunnel VLESS 代理（Cloudflare IP 出口）
+# 使用 VLESS 链接（推荐，无需填写 UUID）
+browser = cfspider.Browser(
+    cf_proxies="vless://your-uuid@v2.example.com:443?path=/"
+)
+html = browser.html("https://httpbin.org/ip")
+print(html)  # 返回 Cloudflare IP
+browser.close()
+
+# 使用 edgetunnel 域名 + UUID（旧方式）
 browser = cfspider.Browser(
     cf_proxies="v2.example.com",
     vless_uuid="your-vless-uuid"
 )
 html = browser.html("https://httpbin.org/ip")
-print(html)  # 返回 Cloudflare IP
 browser.close()
 
 # 无代理模式
@@ -737,13 +744,16 @@ browser = cfspider.Browser(cf_proxies="http://127.0.0.1:9674")
 # 3. SOCKS5 代理
 browser = cfspider.Browser(cf_proxies="socks5://127.0.0.1:1080")
 
-# 4. edgetunnel VLESS 代理（Cloudflare IP 出口）
+# 4. VLESS 链接（推荐，无需填写 UUID）
+browser = cfspider.Browser(cf_proxies="vless://uuid@v2.example.com:443?path=/")
+
+# 5. edgetunnel 域名 + UUID（旧方式）
 browser = cfspider.Browser(
     cf_proxies="v2.example.com",
     vless_uuid="your-vless-uuid"
 )
 
-# 5. 无代理
+# 6. 无代理
 browser = cfspider.Browser()
 ```
 
