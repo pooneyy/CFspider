@@ -1,4 +1,4 @@
-// CFspider - Cloudflare Workers 代理 IP 池 v1.4.1
+// CFspider - Cloudflare Workers 代理 IP 池 v1.7.3
 // 支持：同步/异步请求、TLS指纹模拟、浏览器自动化
 
 let 反代IP = '';
