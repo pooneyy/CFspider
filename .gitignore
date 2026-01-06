@@ -2,9 +2,6 @@ pages/
 node_modules/
 wrangler.toml
 .wrangler/
-cfspider/
-setup.py
-pyproject.toml
 dist/
 build/
 *.egg-info/

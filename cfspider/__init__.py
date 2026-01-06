@@ -1,0 +1,230 @@
+"""
+CFspider - Cloudflare 代理 IP 池 Python 库
+
+一个基于 Cloudflare Workers 的代理 IP 池库，提供：
+- 同步/异步 HTTP 请求（兼容 requests/httpx）
+- TLS 指纹模拟（基于 curl_cffi，支持 25+ 浏览器指纹）
+- 隐身模式（自动添加完整浏览器请求头，避免反爬检测）
+- 浏览器自动化（基于 Playwright，支持 VLESS 代理）
+- IP 地图可视化（生成 Cyberpunk 风格的地图）
+- 网页镜像（保存网页到本地，自动重写资源链接）
+
+快速开始：
+    >>> import cfspider
+    >>> 
+    >>> # 基本 GET 请求（无代理）
+    >>> response = cfspider.get("https://httpbin.org/ip")
+    >>> print(response.json())
+    >>> 
+    >>> # 使用 Cloudflare Workers 代理
+    >>> response = cfspider.get(
+    ...     "https://httpbin.org/ip",
+    ...     cf_proxies="https://your-workers.dev"
+    ... )
+    >>> print(response.cf_colo)  # Cloudflare 节点代码
+    >>> 
+    >>> # 启用隐身模式（自动添加 15+ 浏览器请求头）
+    >>> response = cfspider.get(
+    ...     "https://example.com",
+    ...     stealth=True,
+    ...     stealth_browser='chrome'
+    ... )
+    >>> 
+    >>> # TLS 指纹模拟
+    >>> response = cfspider.get(
+    ...     "https://example.com",
+    ...     impersonate="chrome131"
+    ... )
+
+版本信息：
+    - 版本号: 1.7.0
+    - 协议: Apache License 2.0
+    - 文档: https://spider.violetteam.cloud
+
+依赖关系：
+    必需：requests
+    可选：
+        - httpx[http2]: HTTP/2 和异步请求支持
+        - curl_cffi: TLS 指纹模拟
+        - playwright: 浏览器自动化
+        - beautifulsoup4: 网页镜像
+"""
+
+from .api import (
+    get, post, put, delete, head, options, patch, request,
+    clear_map_records, get_map_collector
+)
+from .session import Session
+from .cli import install_browser
+
+# IP 地图可视化
+from .ip_map import (
+    IPMapCollector, generate_map_html, add_ip_record,
+    get_collector as get_ip_collector, clear_records as clear_ip_records,
+    COLO_COORDINATES
+)
+
+# 网页镜像
+from .mirror import mirror, MirrorResult, WebMirror
+
+# 异步 API（基于 httpx）
+from .async_api import (
+    aget, apost, aput, adelete, ahead, aoptions, apatch,
+    arequest, astream,
+    AsyncCFSpiderResponse, AsyncStreamResponse
+)
+from .async_session import AsyncSession
+
+# TLS 指纹模拟 API（基于 curl_cffi）
+from .impersonate import (
+    impersonate_get, impersonate_post, impersonate_put,
+    impersonate_delete, impersonate_head, impersonate_options,
+    impersonate_patch, impersonate_request,
+    ImpersonateSession, ImpersonateResponse,
+    get_supported_browsers, SUPPORTED_BROWSERS
+)
+
+# 隐身模式（反爬虫规避）
+from .stealth import (
+    StealthSession,
+    get_stealth_headers, get_random_browser_headers,
+    random_delay, get_referer, update_sec_fetch_headers,
+    BROWSER_PROFILES, SUPPORTED_BROWSERS as STEALTH_BROWSERS,
+    CHROME_HEADERS, FIREFOX_HEADERS, SAFARI_HEADERS, EDGE_HEADERS, CHROME_MOBILE_HEADERS
+)
+
+
+# 延迟导入 Browser，避免强制依赖 playwright
+def Browser(cf_proxies=None, headless=True, timeout=30, vless_uuid=None):
+    """
+    创建浏览器实例
+    
+    Args:
+        cf_proxies: 代理地址，支持以下格式：
+                    - VLESS 链接: "vless://uuid@host:port?path=/xxx#name"（推荐）
+                    - HTTP 代理: "http://ip:port" 或 "ip:port"
+                    - SOCKS5 代理: "socks5://ip:port"
+                    - edgetunnel 域名: "v2.example.com"（需配合 vless_uuid）
+                    如不指定，则直接使用本地网络
+        headless: 是否无头模式，默认 True
+        timeout: 请求超时时间（秒），默认 30
+        vless_uuid: VLESS UUID，仅当使用域名方式时需要指定
+                    如果使用完整 VLESS 链接，则无需此参数
+        
+    Returns:
+        Browser: 浏览器实例
+        
+    Example:
+        >>> import cfspider
+        >>> # 使用完整 VLESS 链接（推荐，无需 vless_uuid）
+        >>> browser = cfspider.Browser(
+        ...     cf_proxies="vless://uuid@v2.example.com:443?path=/"
+        ... )
+        >>> html = browser.html("https://example.com")
+        >>> browser.close()
+        >>> 
+        >>> # 使用域名 + UUID（旧方式）
+        >>> browser = cfspider.Browser(
+        ...     cf_proxies="v2.example.com",
+        ...     vless_uuid="your-vless-uuid"
+        ... )
+        >>> 
+        >>> # 直接使用（无代理）
+        >>> browser = cfspider.Browser()
+    """
+    from .browser import Browser as _Browser
+    return _Browser(cf_proxies, headless, timeout, vless_uuid)
+
+
+def parse_vless_link(vless_link):
+    """
+    解析 VLESS 链接
+    
+    Args:
+        vless_link: VLESS 链接字符串，如 "vless://uuid@host:port?path=/xxx#name"
+        
+    Returns:
+        dict: 包含 uuid, host, port, path 的字典，解析失败返回 None
+        
+    Example:
+        >>> import cfspider
+        >>> info = cfspider.parse_vless_link("vless://abc123@v2.example.com:443?path=/ws#proxy")
+        >>> print(info)
+        {'uuid': 'abc123', 'host': 'v2.example.com', 'port': 443, 'path': '/ws'}
+    """
+    from .browser import parse_vless_link as _parse
+    return _parse(vless_link)
+
+
+class CFSpiderError(Exception):
+    """
+    CFspider 基础异常类
+    
+    所有 CFspider 相关的异常都继承自此类。
+    
+    Example:
+        >>> try:
+        ...     response = cfspider.get("https://invalid-url")
+        ... except cfspider.CFSpiderError as e:
+        ...     print(f"请求失败: {e}")
+    """
+    pass
+
+
+class BrowserNotInstalledError(CFSpiderError):
+    """
+    浏览器未安装错误
+    
+    当尝试使用浏览器模式但 Chromium 未安装时抛出。
+    
+    解决方案：
+        >>> import cfspider
+        >>> cfspider.install_browser()  # 自动安装 Chromium
+        
+    或使用命令行：
+        $ cfspider install
+    """
+    pass
+
+
+class PlaywrightNotInstalledError(CFSpiderError):
+    """
+    Playwright 未安装错误
+    
+    当尝试使用浏览器模式但 Playwright 库未安装时抛出。
+    
+    解决方案：
+        $ pip install playwright
+    """
+    pass
+
+
+__version__ = "1.7.3"
+__all__ = [
+    # 同步 API (requests)
+    "get", "post", "put", "delete", "head", "options", "patch", "request",
+    "Session", "Browser", "install_browser", "parse_vless_link",
+    "CFSpiderError", "BrowserNotInstalledError", "PlaywrightNotInstalledError",
+    # 异步 API (httpx)
+    "aget", "apost", "aput", "adelete", "ahead", "aoptions", "apatch",
+    "arequest", "astream",
+    "AsyncSession", "AsyncCFSpiderResponse", "AsyncStreamResponse",
+    # TLS 指纹模拟 API (curl_cffi)
+    "impersonate_get", "impersonate_post", "impersonate_put",
+    "impersonate_delete", "impersonate_head", "impersonate_options",
+    "impersonate_patch", "impersonate_request",
+    "ImpersonateSession", "ImpersonateResponse",
+    "get_supported_browsers", "SUPPORTED_BROWSERS",
+    # 隐身模式（反爬虫规避）
+    "StealthSession",
+    "get_stealth_headers", "get_random_browser_headers",
+    "random_delay", "get_referer", "update_sec_fetch_headers",
+    "BROWSER_PROFILES", "STEALTH_BROWSERS",
+    "CHROME_HEADERS", "FIREFOX_HEADERS", "SAFARI_HEADERS", "EDGE_HEADERS", "CHROME_MOBILE_HEADERS",
+    # IP 地图可视化
+    "IPMapCollector", "generate_map_html", "add_ip_record",
+    "get_ip_collector", "clear_ip_records", "COLO_COORDINATES",
+    "clear_map_records", "get_map_collector",
+    # 网页镜像
+    "mirror", "MirrorResult", "WebMirror"
+]
