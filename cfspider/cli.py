@@ -1,9 +1,23 @@
 """
 CFspider 命令行工具
+
+提供完整的命令行接口，支持：
+- GET/POST/HEAD 等 HTTP 请求
+- 批量 URL 请求
+- 数据提取和导出
+- VPN 代理模式
+- 浏览器安装
+
+用法示例：
+    cfspider get https://example.com
+    cfspider post https://api.example.com -d '{"key": "value"}'
+    cfspider batch urls.txt --pick "title:h1" -o results.csv
 """
 
 import sys
 import subprocess
+import argparse
+import json
 
 
 def install_browser():
@@ -26,15 +40,367 @@ def install_browser():
         return False
 
 
+def cmd_get(args):
+    """执行 GET 请求"""
+    from . import api
+    
+    # 解析请求头
+    headers = {}
+    if args.header:
+        for h in args.header:
+            if ':' in h:
+                key, value = h.split(':', 1)
+                headers[key.strip()] = value.strip()
+    
+    try:
+        response = api.get(
+            args.url,
+            cf_proxies=args.proxy,
+            token=args.token,
+            impersonate=args.impersonate,
+            stealth=args.stealth,
+            stealth_browser=args.stealth_browser or 'chrome',
+            headers=headers if headers else None,
+            timeout=args.timeout,
+        )
+        
+        # 输出结果
+        _output_response(response, args)
+        
+    except Exception as e:
+        print(f"请求失败: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_post(args):
+    """执行 POST 请求"""
+    from . import api
+    
+    # 解析请求头
+    headers = {}
+    if args.header:
+        for h in args.header:
+            if ':' in h:
+                key, value = h.split(':', 1)
+                headers[key.strip()] = value.strip()
+    
+    # 解析数据
+    data = None
+    json_data = None
+    
+    if args.data:
+        # 尝试解析为 JSON
+        try:
+            json_data = json.loads(args.data)
+        except json.JSONDecodeError:
+            data = args.data
+    
+    if args.form:
+        # 表单数据
+        data = {}
+        for item in args.form.split('&'):
+            if '=' in item:
+                key, value = item.split('=', 1)
+                data[key] = value
+    
+    try:
+        response = api.post(
+            args.url,
+            cf_proxies=args.proxy,
+            token=args.token,
+            impersonate=args.impersonate,
+            stealth=args.stealth,
+            stealth_browser=args.stealth_browser or 'chrome',
+            headers=headers if headers else None,
+            data=data,
+            json=json_data,
+            timeout=args.timeout,
+        )
+        
+        # 输出结果
+        _output_response(response, args)
+        
+    except Exception as e:
+        print(f"请求失败: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_head(args):
+    """执行 HEAD 请求"""
+    from . import api
+    
+    headers = {}
+    if args.header:
+        for h in args.header:
+            if ':' in h:
+                key, value = h.split(':', 1)
+                headers[key.strip()] = value.strip()
+    
+    try:
+        response = api.head(
+            args.url,
+            cf_proxies=args.proxy,
+            token=args.token,
+            impersonate=args.impersonate,
+            stealth=args.stealth,
+            headers=headers if headers else None,
+            timeout=args.timeout,
+        )
+        
+        # HEAD 请求只输出响应头
+        print(f"HTTP {response.status_code}")
+        for key, value in response.headers.items():
+            print(f"{key}: {value}")
+        
+        if response.cf_colo:
+            print(f"\nCF-Colo: {response.cf_colo}")
+        if response.cf_ray:
+            print(f"CF-Ray: {response.cf_ray}")
+        
+    except Exception as e:
+        print(f"请求失败: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_batch(args):
+    """执行批量请求"""
+    from .batch import batch
+    
+    # 解析 URL 列表
+    if args.urls:
+        # 从命令行参数获取 URL
+        urls = args.urls
+    else:
+        # 从文件读取
+        print("错误: 必须提供 URL 列表或文件", file=sys.stderr)
+        sys.exit(1)
+    
+    # 解析 pick 规则
+    pick = None
+    if args.pick:
+        pick = {}
+        for rule in args.pick:
+            if ':' in rule:
+                name, selector = rule.split(':', 1)
+                # 检查是否有属性指定 (selector@attr)
+                if '@' in selector:
+                    sel, attr = selector.rsplit('@', 1)
+                    pick[name] = (sel, attr)
+                else:
+                    pick[name] = selector
+    
+    try:
+        results = batch(
+            urls=urls,
+            pick=pick,
+            concurrency=args.concurrency,
+            delay=args.delay,
+            retry=args.retry,
+            timeout=args.timeout,
+            cf_proxies=args.proxy,
+            token=args.token,
+            impersonate=args.impersonate,
+            stealth=args.stealth,
+            progress=not args.quiet,
+        )
+        
+        # 输出摘要
+        if not args.quiet:
+            summary = results.summary()
+            print(f"\n完成: {summary['successful']}/{summary['total']} 成功 "
+                  f"({summary['success_rate']}), 耗时 {summary['total_duration']}")
+        
+        # 保存结果
+        if args.output:
+            filepath = results.save(args.output)
+            if not args.quiet:
+                print(f"结果已保存到: {filepath}")
+        else:
+            # 输出到标准输出
+            print(json.dumps(results.to_list(), ensure_ascii=False, indent=2))
+        
+    except Exception as e:
+        print(f"批量请求失败: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _output_response(response, args):
+    """输出响应结果"""
+    # 数据提取
+    if args.pick:
+        pick = {}
+        for rule in args.pick:
+            if ':' in rule:
+                name, selector = rule.split(':', 1)
+                if '@' in selector:
+                    sel, attr = selector.rsplit('@', 1)
+                    pick[name] = (sel, attr)
+                else:
+                    pick[name] = selector
+        
+        data = response.pick(**pick)
+        
+        if args.output:
+            data.save(args.output)
+            print(f"结果已保存到: {args.output}")
+        else:
+            print(json.dumps(dict(data), ensure_ascii=False, indent=2))
+    
+    else:
+        # 直接输出响应
+        if args.output:
+            response.save(args.output)
+            print(f"响应已保存到: {args.output}")
+        else:
+            # 输出响应信息
+            if args.verbose:
+                print(f"HTTP {response.status_code}")
+                for key, value in response.headers.items():
+                    print(f"{key}: {value}")
+                print()
+            
+            # 输出响应体
+            try:
+                # 尝试格式化 JSON
+                data = response.json()
+                print(json.dumps(data, ensure_ascii=False, indent=2))
+            except:
+                print(response.text)
+            
+            # 输出 CF 信息
+            if args.verbose and response.cf_colo:
+                print(f"\n[CF-Colo: {response.cf_colo}]")
+
+
+def cmd_vpn(args):
+    """VPN 代理命令"""
+    if args.vpn_command == 'start':
+        from .vless_client import start_socks5_proxy
+        
+        print(f"启动 SOCKS5 代理服务器...")
+        print(f"Workers URL: {args.workers_url}")
+        print(f"本地端口: {args.port}")
+        print(f"监听地址: 127.0.0.1:{args.port}")
+        print()
+        print("使用方法:")
+        print(f"  - 设置系统代理为 SOCKS5://127.0.0.1:{args.port}")
+        print(f"  - 或使用浏览器扩展如 SwitchyOmega")
+        print()
+        print("按 Ctrl+C 停止服务")
+        
+        try:
+            start_socks5_proxy(
+                workers_url=args.workers_url,
+                local_port=args.port,
+                token=args.token
+            )
+        except KeyboardInterrupt:
+            print("\n代理服务已停止")
+    else:
+        print("未知的 VPN 子命令")
+        sys.exit(1)
+
+
 def main():
     """命令行入口"""
-    if len(sys.argv) < 2:
+    parser = argparse.ArgumentParser(
+        description='CFspider - Cloudflare 代理 IP 池',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+    cfspider get https://httpbin.org/ip
+    cfspider get https://example.com --proxy https://workers.dev --pick "title:h1"
+    cfspider post https://api.example.com -d '{"key": "value"}'
+    cfspider batch urls.txt --pick "title:h1" "links:a@href" -o results.csv
+    cfspider vpn start --workers-url https://your.workers.dev --port 1080
+
+更多信息: https://www.cfspider.com
+"""
+    )
+    
+    subparsers = parser.add_subparsers(dest='command', help='可用命令')
+    
+    # ===== install 命令 =====
+    install_parser = subparsers.add_parser('install', help='安装 Chromium 浏览器')
+    
+    # ===== version 命令 =====
+    version_parser = subparsers.add_parser('version', help='显示版本号')
+    
+    # ===== 通用请求参数 =====
+    def add_common_args(p):
+        p.add_argument('-H', '--header', action='append', metavar='HEADER',
+                       help='请求头 (如 "User-Agent: Mozilla/5.0")')
+        p.add_argument('--proxy', metavar='URL',
+                       help='Workers 代理地址')
+        p.add_argument('--token', metavar='TOKEN',
+                       help='鉴权 token')
+        p.add_argument('--impersonate', metavar='BROWSER',
+                       help='TLS 指纹模拟 (如 chrome131)')
+        p.add_argument('--stealth', action='store_true',
+                       help='启用隐身模式')
+        p.add_argument('--stealth-browser', metavar='BROWSER',
+                       help='隐身模式浏览器类型')
+        p.add_argument('--timeout', type=float, default=30,
+                       help='超时时间（秒）')
+        p.add_argument('--pick', action='append', metavar='RULE',
+                       help='数据提取规则 (如 "title:h1")')
+        p.add_argument('-o', '--output', metavar='FILE',
+                       help='输出文件')
+        p.add_argument('-v', '--verbose', action='store_true',
+                       help='显示详细信息')
+    
+    # ===== get 命令 =====
+    get_parser = subparsers.add_parser('get', help='发送 GET 请求')
+    get_parser.add_argument('url', help='目标 URL')
+    add_common_args(get_parser)
+    
+    # ===== post 命令 =====
+    post_parser = subparsers.add_parser('post', help='发送 POST 请求')
+    post_parser.add_argument('url', help='目标 URL')
+    post_parser.add_argument('-d', '--data', metavar='DATA',
+                             help='POST 数据 (JSON 或字符串)')
+    post_parser.add_argument('-f', '--form', metavar='DATA',
+                             help='表单数据 (如 "name=test&age=20")')
+    add_common_args(post_parser)
+    
+    # ===== head 命令 =====
+    head_parser = subparsers.add_parser('head', help='发送 HEAD 请求')
+    head_parser.add_argument('url', help='目标 URL')
+    add_common_args(head_parser)
+    
+    # ===== batch 命令 =====
+    batch_parser = subparsers.add_parser('batch', help='批量请求')
+    batch_parser.add_argument('urls', nargs='*', help='URL 列表或文件路径')
+    batch_parser.add_argument('--concurrency', '-c', type=int, default=5,
+                              help='并发数 (默认 5)')
+    batch_parser.add_argument('--delay', type=float, default=0,
+                              help='请求间隔（秒）')
+    batch_parser.add_argument('--retry', type=int, default=0,
+                              help='失败重试次数')
+    batch_parser.add_argument('-q', '--quiet', action='store_true',
+                              help='安静模式，不显示进度')
+    add_common_args(batch_parser)
+    
+    # ===== vpn 命令 =====
+    vpn_parser = subparsers.add_parser('vpn', help='VPN 代理模式')
+    vpn_subparsers = vpn_parser.add_subparsers(dest='vpn_command')
+    
+    vpn_start = vpn_subparsers.add_parser('start', help='启动 SOCKS5 代理')
+    vpn_start.add_argument('--workers-url', required=True,
+                           help='Workers URL')
+    vpn_start.add_argument('--port', type=int, default=1080,
+                           help='本地端口 (默认 1080)')
+    vpn_start.add_argument('--token',
+                           help='鉴权 token')
+    
+    # 解析参数
+    args = parser.parse_args()
+    
+    if not args.command:
         print_help()
         return
     
-    command = sys.argv[1].lower()
-    
-    if command == 'install':
+    if args.command == 'install':
         print("正在安装 Chromium 浏览器...")
         if install_browser():
             print("安装完成!")
@@ -42,16 +408,27 @@ def main():
             print("安装失败，请检查网络连接或手动安装")
             sys.exit(1)
     
-    elif command == 'version':
+    elif args.command == 'version':
         from . import __version__
         print(f"cfspider {__version__}")
     
-    elif command == 'help' or command == '-h' or command == '--help':
-        print_help()
+    elif args.command == 'get':
+        cmd_get(args)
+    
+    elif args.command == 'post':
+        cmd_post(args)
+    
+    elif args.command == 'head':
+        cmd_head(args)
+    
+    elif args.command == 'batch':
+        cmd_batch(args)
+    
+    elif args.command == 'vpn':
+        cmd_vpn(args)
     
     else:
-        print(f"未知命令: {command}")
-        print_help()
+        parser.print_help()
         sys.exit(1)
 
 
@@ -61,21 +438,35 @@ def print_help():
 CFspider - Cloudflare 代理 IP 池
 
 用法:
-    cfspider <command>
+    cfspider <command> [options]
 
 命令:
-    install     安装 Chromium 浏览器（用于 Browser 功能）
-    version     显示版本号
-    help        显示帮助信息
+    get <url>       发送 GET 请求
+    post <url>      发送 POST 请求
+    head <url>      发送 HEAD 请求
+    batch <urls>    批量请求多个 URL
+    vpn start       启动 SOCKS5 代理服务器
+    install         安装 Chromium 浏览器
+    version         显示版本号
+
+通用选项:
+    -H, --header    添加请求头
+    --proxy         Workers 代理地址
+    --token         鉴权 token
+    --impersonate   TLS 指纹模拟
+    --stealth       启用隐身模式
+    --pick          数据提取规则
+    -o, --output    输出文件
 
 示例:
-    cfspider install    # 安装浏览器
-    cfspider version    # 显示版本
+    cfspider get https://httpbin.org/ip
+    cfspider get https://example.com --pick "title:h1" -o data.json
+    cfspider batch url1 url2 url3 --pick "title:h1" -o results.csv
+    cfspider vpn start --workers-url https://your.workers.dev
 
-更多信息请访问: https://github.com/violettoolssite/CFspider
+更多信息请访问: https://www.cfspider.com
 """)
 
 
 if __name__ == '__main__':
     main()
-

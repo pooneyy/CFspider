@@ -47,7 +47,10 @@ export default {
         
         if (path === '' || path === '/') {
             return new Response(generateCyberpunkPage(request, url, 访问IP), {
-                headers: { 'Content-Type': 'text/html; charset=utf-8' }
+                headers: { 
+                    'Content-Type': 'text/html; charset=utf-8',
+                    ...corsHeaders
+                }
             });
         }
         
@@ -1279,7 +1282,7 @@ browser.<span class="code-function">close</span>()</pre>
             <p style="margin-top:15px;">
                 <a href="https://github.com/violettoolssite/CFspider" target="_blank">GITHUB</a>
                 <a href="https://pypi.org/project/cfspider/" target="_blank">PYPI</a>
-                <a href="https://spider.violetteam.cloud" target="_blank">DOCS</a>
+                <a href="https://cfspider.com" target="_blank">DOCS</a>
             </p>
             <p style="margin-top:15px;">${t.footer}<span class="cursor"></span></p>
         </footer>

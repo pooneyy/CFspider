@@ -39,7 +39,7 @@ CFspider - Cloudflare 代理 IP 池 Python 库
 版本信息：
     - 版本号: 1.7.0
     - 协议: Apache License 2.0
-    - 文档: https://spider.violetteam.cloud
+    - 文档: https://www.cfspider.com
 
 依赖关系：
     必需：requests
@@ -66,6 +66,12 @@ from .ip_map import (
 
 # 网页镜像
 from .mirror import mirror, MirrorResult, WebMirror
+
+# 批量请求
+from .batch import batch, abatch, BatchResult, BatchItem
+
+# 数据导出
+from .export import export
 
 # 异步 API（基于 httpx）
 from .async_api import (
@@ -199,7 +205,7 @@ class PlaywrightNotInstalledError(CFSpiderError):
     pass
 
 
-__version__ = "1.7.3"
+__version__ = "1.8.0"
 __all__ = [
     # 同步 API (requests)
     "get", "post", "put", "delete", "head", "options", "patch", "request",
@@ -226,5 +232,9 @@ __all__ = [
     "get_ip_collector", "clear_ip_records", "COLO_COORDINATES",
     "clear_map_records", "get_map_collector",
     # 网页镜像
-    "mirror", "MirrorResult", "WebMirror"
+    "mirror", "MirrorResult", "WebMirror",
+    # 批量请求
+    "batch", "abatch", "BatchResult", "BatchItem",
+    # 数据导出
+    "export",
 ]

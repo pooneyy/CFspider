@@ -1102,6 +1102,221 @@ save_dir/
 - **浏览器渲染**：使用 Playwright 渲染 JavaScript 动态页面
 - **自动预览**：下载完成后自动打开浏览器预览
 
+## 数据提取
+
+CFspider 1.8.0 新增了强大的数据提取功能，支持 CSS 选择器、XPath、JSONPath，让网页数据提取变得简单直观。
+
+### 安装数据提取依赖（可选）
+
+```bash
+# 安装完整数据提取功能
+pip install cfspider[extract]
+
+# 或单独安装某个功能
+pip install cfspider[xpath]    # XPath 支持
+pip install cfspider[excel]    # Excel 导出
+```
+
+### 基本用法
+
+```python
+import cfspider
+
+# 发送请求
+response = cfspider.get("https://example.com")
+
+# CSS 选择器提取
+title = response.find("h1")           # 第一个 h1 的文本
+links = response.find_all("a", attr="href")  # 所有链接
+
+# XPath 提取（需要安装 lxml）
+price = response.xpath("//span[@class='price']/text()")
+
+# JSONPath 提取（用于 JSON API）
+response = cfspider.get("https://api.example.com/data")
+names = response.jpath_all("$.data[*].name")
+```
+
+### 批量字段提取
+
+使用 `pick()` 方法一次提取多个字段：
+
+```python
+# 提取多个字段
+data = response.pick(
+    title="h1",                    # CSS 选择器提取文本
+    author=".author-name",         # CSS 选择器
+    links=("a", "href"),           # 元组形式提取属性
+    price=(".price", "text", float),  # 带类型转换
+)
+
+# data 是一个 ExtractResult 字典
+print(data["title"])   # 标题文本
+print(data["links"])   # 所有链接
+
+# 直接保存到文件
+data.save("output.csv")   # 保存为 CSV
+data.save("output.json")  # 保存为 JSON
+data.save("output.xlsx")  # 保存为 Excel（需要 openpyxl）
+```
+
+### 链式 Element 操作
+
+```python
+# 获取 Element 对象进行链式操作
+product = response.css_one(".product-card")
+
+# 在元素内部继续查找
+name = product.find("h2")
+price = product.find(".price")
+image = product.find("img", attr="src")
+
+# 获取元素属性
+print(product["id"])        # 获取 id 属性
+print(product.text)         # 获取文本内容
+print(product.html)         # 获取 HTML 内容
+```
+
+### 自动识别选择器类型
+
+`find()` 方法会自动识别选择器类型：
+
+```python
+# 自动识别选择器类型
+response.find("h1")              # CSS（默认）
+response.find("//h1/text()")     # XPath（以 // 开头）
+response.find("$.data.title")    # JSONPath（以 $ 开头）
+```
+
+## 批量请求
+
+CFspider 支持批量请求多个 URL，自动处理并发控制、重试和进度显示。
+
+### 基本用法
+
+```python
+import cfspider
+
+# 批量请求多个 URL
+urls = [
+    "https://example.com/page1",
+    "https://example.com/page2",
+    "https://example.com/page3",
+]
+
+results = cfspider.batch(urls, concurrency=5)
+
+# 遍历结果
+for item in results:
+    if item.success:
+        print(f"{item.url}: {item.response.status_code}")
+    else:
+        print(f"{item.url}: Error - {item.error}")
+```
+
+### 带数据提取的批量请求
+
+```python
+# 批量请求并提取数据
+results = cfspider.batch(
+    urls,
+    pick={"title": "h1", "price": ".price"},  # 每个页面提取的字段
+    concurrency=10,          # 并发数
+    delay=0.5,               # 请求间隔（秒）
+    retry=2,                 # 失败重试次数
+    progress=True,           # 显示进度条
+)
+
+# 保存结果
+results.save("output.csv")
+
+# 查看摘要
+print(results.summary())
+# {'total': 100, 'successful': 98, 'failed': 2, 'success_rate': '98.0%', ...}
+```
+
+### 从文件读取 URL
+
+```python
+# 从文件读取 URL（每行一个）
+results = cfspider.batch(
+    "urls.txt",              # 文件路径
+    pick={"title": "h1"},
+    concurrency=5,
+)
+```
+
+### 异步批量请求
+
+```python
+import asyncio
+import cfspider
+
+async def main():
+    results = await cfspider.abatch(
+        urls,
+        pick={"title": "h1"},
+        concurrency=20,       # 异步可以更高的并发
+    )
+    results.save("output.json")
+
+asyncio.run(main())
+```
+
+## 命令行工具
+
+CFspider 提供了完整的命令行工具：
+
+```bash
+# GET 请求
+cfspider get https://httpbin.org/ip
+
+# 使用代理
+cfspider get https://example.com --proxy https://your.workers.dev
+
+# 数据提取
+cfspider get https://example.com --pick "title:h1" "links:a@href" -o data.csv
+
+# POST 请求
+cfspider post https://api.example.com -d '{"key": "value"}'
+
+# 批量请求
+cfspider batch url1 url2 url3 --pick "title:h1" -o results.csv
+
+# 从文件批量请求
+cfspider batch urls.txt -c 10 --pick "title:h1" -o results.json
+
+# VPN 模式
+cfspider vpn start --workers-url https://your.workers.dev --port 1080
+
+# 安装浏览器
+cfspider install
+```
+
+### 命令行选项
+
+```bash
+cfspider get/post <url> [options]
+
+选项:
+  -H, --header HEADER     请求头 (如 "User-Agent: xxx")
+  --proxy URL             Workers 代理地址
+  --token TOKEN           鉴权 token
+  --impersonate BROWSER   TLS 指纹模拟 (如 chrome131)
+  --stealth               启用隐身模式
+  --pick RULE             数据提取规则 (如 "title:h1")
+  -o, --output FILE       输出文件
+  -v, --verbose           显示详细信息
+
+cfspider batch <urls...> [options]
+
+选项:
+  -c, --concurrency N     并发数 (默认 5)
+  --delay N               请求间隔（秒）
+  --retry N               失败重试次数
+  -q, --quiet             安静模式
+```
+
 ## 浏览器模式
 
 CFspider 支持浏览器模式，可以渲染 JavaScript 动态页面、截图、生成 PDF、自动化操作等。

@@ -108,6 +108,80 @@ class AsyncCFSpiderResponse:
     def raise_for_status(self) -> None:
         self._response.raise_for_status()
     
+    # ========== 数据提取方法 ==========
+    
+    def _get_extractor(self):
+        """获取数据提取器（延迟初始化）"""
+        if not hasattr(self, '_extractor') or self._extractor is None:
+            from .extract import Extractor
+            content_type = "json" if self._is_json_response() else "html"
+            self._extractor = Extractor(self.text, content_type)
+        return self._extractor
+    
+    def _is_json_response(self) -> bool:
+        """判断是否是 JSON 响应"""
+        content_type = self.headers.get("content-type", "")
+        return "application/json" in content_type.lower()
+    
+    def find(self, selector: str, attr: str = None, strip: bool = True, 
+             regex: str = None, parser=None):
+        """查找第一个匹配的元素"""
+        return self._get_extractor().find(selector, attr=attr, strip=strip, 
+                                          regex=regex, parser=parser)
+    
+    def find_all(self, selector: str, attr: str = None, strip: bool = True):
+        """查找所有匹配的元素"""
+        return self._get_extractor().find_all(selector, attr=attr, strip=strip)
+    
+    def css(self, selector: str, attr: str = None, html: bool = False, strip: bool = True):
+        """使用 CSS 选择器提取"""
+        return self._get_extractor().css(selector, attr=attr, html=html, strip=strip)
+    
+    def css_all(self, selector: str, attr: str = None, html: bool = False, strip: bool = True):
+        """使用 CSS 选择器提取所有"""
+        return self._get_extractor().css_all(selector, attr=attr, html=html, strip=strip)
+    
+    def css_one(self, selector: str):
+        """返回第一个匹配的 Element 对象"""
+        return self._get_extractor().css_one(selector)
+    
+    def xpath(self, expression: str):
+        """使用 XPath 表达式提取"""
+        return self._get_extractor().xpath(expression)
+    
+    def xpath_all(self, expression: str):
+        """使用 XPath 表达式提取所有"""
+        return self._get_extractor().xpath_all(expression)
+    
+    def xpath_one(self, expression: str):
+        """返回第一个匹配的 Element 对象"""
+        return self._get_extractor().xpath_one(expression)
+    
+    def jpath(self, expression: str):
+        """使用 JSONPath 表达式提取"""
+        return self._get_extractor().jpath(expression)
+    
+    def jpath_all(self, expression: str):
+        """使用 JSONPath 表达式提取所有"""
+        return self._get_extractor().jpath_all(expression)
+    
+    def pick(self, **fields):
+        """批量提取多个字段"""
+        result = self._get_extractor().pick(**fields)
+        result.url = str(self.url)
+        return result
+    
+    def extract(self, rules: dict):
+        """使用规则字典提取数据"""
+        result = self._get_extractor().extract(rules)
+        result.url = str(self.url)
+        return result
+    
+    def save(self, filepath: str, encoding: str = "utf-8"):
+        """保存响应内容到文件"""
+        from .export import save_response
+        return save_response(self.content, filepath, encoding=encoding)
+    
     async def aiter_bytes(self, chunk_size: Optional[int] = None) -> AsyncIterator[bytes]:
         """异步迭代响应字节"""
         async for chunk in self._response.aiter_bytes(chunk_size):
