@@ -37,7 +37,7 @@ CFspider - Cloudflare 代理 IP 池 Python 库
     ... )
 
 版本信息：
-    - 版本号: 1.7.0
+    - 版本号: 1.8.0
     - 协议: Apache License 2.0
     - 文档: https://www.cfspider.com
 
