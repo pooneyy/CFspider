@@ -334,7 +334,7 @@ def export_sqlite(data: Union[Dict, List[Dict]],
     
     # 插入数据
     placeholders = ", ".join(["?" for _ in fieldnames])
-    insert_sql = f"INSERT INTO {table} ({', '.join([f'\"{n}\"' for n in fieldnames])}) VALUES ({placeholders})"
+    insert_sql = f"""INSERT INTO {table} ({', '.join([f'"{n}"' for n in fieldnames])}) VALUES ({placeholders})"""
     
     for row in rows:
         if isinstance(row, dict):
